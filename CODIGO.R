@@ -320,10 +320,10 @@ ggplot(data = datos) +
   geom_sf(aes(fill = lisa), color = NA) +
   scale_fill_manual(values = color_map) +
   labs(title = "Mapa de Clusters de LISA ICV_P2",
-       fill = "Categor??a LISA") +
+       fill = "Categoria LISA") +
   theme_minimal()
 
-# Funci??n para clasificar los p-valores
+# Funcion para clasificar los p-valores
 classify_pvalues <- function(pvalue) {
   if (pvalue < 0.0001) {
     return("p < 0.0001")
@@ -338,7 +338,7 @@ classify_pvalues <- function(pvalue) {
   }
 }
 
-# Aplicar la funci??n a los datos
+# Aplicar la funcion a los datos
 datos$LISA_pvalue_class <- sapply(datos$LISA_pvalue, classify_pvalues)
 
 # Definir los colores para los diferentes niveles de significancia
@@ -366,3 +366,5 @@ ggplot(data = datos) +
   scale_fill_gradientn(colours = brewer.pal(9, "YlOrRd")) +
   theme_minimal() +
   labs(fill = "LISA", title = "Mapa de Calor de LISA ICV_PCA")
+
+
