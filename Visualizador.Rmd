@@ -1,0 +1,200 @@
+---
+title: "Visualizador Indice de Calidad de Vida en los muicipios de Santander"
+author: "Lucía Gámez"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    social: menu
+    source_code: embed
+    runtime: shiny
+---
+
+```{r septup, include=FALSE}
+library(plotly)
+library(maps)
+library(sf)
+library(readr)
+library(ggplot2)
+library(spdep)
+library(shiny)
+library(viridis)
+library(tidyr)
+library(kableExtra)
+library(tidyverse)
+library(ggiraph)
+library(cowplot)
+
+data<-read_sf("D:/USUARIO/Documents/OneDrive/Trabajo de grado/R/icv.shp")
+data <- data %>% rename(proporcion = "65/14")
+data <- data %>% rename(ICVPCA = "indpca")
+data <- data %>% rename(ICVP2 = "indp2")
+
+data$ICVP2 <- as.numeric(data$ICVP2)
+data$ICVPCA <- as.numeric(data$ICVPCA)
+
+# Crear la matriz de pesos espaciales
+neighbors <- poly2nb(data)
+weights <- nb2listw(neighbors, style="W")
+
+# Función para clasificar los p-valores
+classify_pvalues <- function(pvalue) {
+  if (pvalue < 0.0001) {
+    return("p < 0.0001")
+  } else if (pvalue < 0.001) {
+    return("p < 0.001")
+  } else if (pvalue < 0.01) {
+    return("p < 0.01")
+  } else if (pvalue < 0.05) {
+    return("p < 0.05")
+  } else {
+    return("p >= 0.05")
+  }
+}
+
+# Función para calcular LISA y clasificar p-valores
+calculate_lisa <- function(variable) {
+  lisa <- localmoran(variable, weights)
+  pvalues <- lisa[, "Pr(z != E(Ii))"]
+  pvalue_class <- sapply(pvalues, classify_pvalues)
+  return(data.frame(LISA_I = lisa[, "Ii"], LISA_pvalue = pvalues, LISA_pvalue_class = pvalue_class))
+}
+
+# Calcular LISA para ICVP2 e ICVPCA
+lisa_icvp2 <- calculate_lisa(data$ICVP2)
+lisa_icvpca <- calculate_lisa(data$ICVPCA)
+
+# Añadir los resultados de LISA a los datos
+data$LISA_icvp2 <- lisa_icvp2$LISA_I
+data$LISA_icvp2_pvalue <- lisa_icvp2$LISA_pvalue
+data$LISA_icvp2_pvalue_class <- lisa_icvp2$LISA_pvalue_class
+
+data$LISA_icvpca <- lisa_icvpca$LISA_I
+data$LISA_icvpca_pvalue <- lisa_icvpca$LISA_pvalue
+data$LISA_icvpca_pvalue_class <- lisa_icvpca$LISA_pvalue_class
+
+# Definir los colores para los diferentes niveles de significancia
+pvalue_colors <- c(
+  "p < 0.0001" = "darkred",
+  "p < 0.001" = "red",
+  "p < 0.01" = "orange",
+  "p < 0.05" = "yellow",
+  "p >= 0.05" = "lightgrey"
+)
+
+# Aplicar colores a los p-valores clasificados
+data$LISA_icvp2_color <- factor(data$LISA_icvp2_pvalue_class, levels = names(pvalue_colors))
+data$LISA_icvpca_color <- factor(data$LISA_icvpca_pvalue_class, levels = names(pvalue_colors))
+
+# Combinar los datos en un solo data.frame
+data_combined <- data %>%
+  select(NOMBRE_MPI, geometry, LISA_icvp2_color, LISA_icvpca_color) %>%
+  gather(key = "variable", value = "LISA_color", -NOMBRE_MPI, -geometry) %>%
+  mutate(variable = recode(variable, 
+                           "LISA_icvp2_color" = "ICVP2", 
+                           "LISA_icvpca_color" = "ICVPCA"))
+
+# mapa de significancia LISA para ambas variables
+combined_map <- ggplot(data_combined) +
+  geom_sf(aes(fill = LISA_color), color = NA) +
+  scale_fill_manual(values = pvalue_colors, name = "Significancia") +
+  theme_minimal() +
+  labs(title = "Mapa de Significancia de LISA para ICVP2 e ICVPCA") +
+  theme(
+    legend.position = "bottom",
+    plot.background = element_rect(fill = "white", color = NA),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      axis.ticks = element_blank()
+  ) +
+  facet_wrap(~ variable, ncol = 2)
+```
+Column{data-width=1000}
+------------------------------------------------------------------------------
+
+```{r}
+ggplotly(combined_map)
+
+#boxplots
+map1<-cbind(data[,1],data[,16:20])
+mapav<-map1
+mapa<-mapav[,-8]
+
+mapv <- mapa %>%
+  gather(variable, value, -NOMBRE_MPI, -geometry)
+
+mapv <- st_as_sf(mapv)
+
+mapav <- mapv %>%
+  group_by(variable) %>%
+  mutate(cuartil = cut(value, breaks = quantile(value, probs = seq(0, 1, 0.25), na.rm = TRUE), 
+                       include.lowest = TRUE, labels = c("Q1", "Q2", "Q3", "Q4")))
+
+palette_azul <- c("#ffffcc", "#a1dab4", "#41b6c4", "#225ea8", "#253494")
+
+boxplots <- mapav %>%
+  ggplot(aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot() +
+  scale_fill_manual(values = palette_azul) + # Aplicar la paleta de colores azules
+  theme_minimal() +
+  labs(title = "Boxplots de Variables", x = "Variable", y = "Valor")
+
+ggplotly(boxplots)
+```
+
+Column{data-width=500}
+------------------------------------------------------------------------------
+
+```{r}
+variables <- colnames(data)[16:22]
+#variables <- variables[-which(variables == "jovenes")]
+variable_names <- as.list(variables)
+selectInput("variable", "Variable: ", choices = variable_names, selected = "indpca")
+```
+
+
+```{r}
+#SELECCIONAR VARIABLE
+selected_variable <- reactive({
+  req(input$variable)
+  data[[input$variable]]
+})
+
+output$indpca_map <- renderPlotly({
+  req(input$variable)
+  
+  #ETIQUETAS
+  qpca <- quantile(selected_variable(), probs = seq(0, 1, 0.25))
+  qpca_t <- round(qpca, 2)
+  etiquetas <- paste0("Q", 1:4, ": ", qpca_t[-5], " - ", qpca_t[-1])
+  
+  
+  mapa <- data %>%
+    mutate(Cuartil = cut(selected_variable(), breaks = qpca, include.lowest = TRUE, labels = etiquetas))
+
+  #MAPA SANTANDER
+  indpca <- ggplot(mapa) +
+    geom_sf(aes(fill = Cuartil, text = paste("Municipio: ", NOMBRE_MPI, "<br>", "Valor: ", selected_variable()))) +
+    scale_fill_manual(values = c("#ffffcc", "#a1dab4", "#41b6c4", "#225ea8"), 
+                      name = "Cuartiles") +
+    theme_minimal() +
+    labs(title = "Distribución Espacial") +
+    theme(
+      legend.position = "bottom",
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      axis.ticks = element_blank()
+    )
+  
+  ggplotly(indpca, tooltip = "text",width = 700, height = 600)
+})
+
+plotlyOutput("indpca_map")
+```
+
+
