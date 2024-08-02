@@ -294,4 +294,75 @@ ICVP2(bf,0.00001,17,stder)
 
 
 
+##############ESTADISTICA ESPACIAL#################
+datos <- mpios
+print(st_geometry_type(datos))
 
+datos$indp2 <- as.numeric(datos$indp2)
+
+# Crear la matriz de pesos espaciales
+neighbors <- poly2nb(datos)
+weights <- nb2listw(neighbors, style="W")
+
+# Calcular el I de Moran local (LISA)
+lisa <- localmoran(datos$indp2, weights)
+lisa
+datos$lisa <- factor(ifelse(lisa[,1] <= 0 & lisa[,2] <= 0, "Low-Low",
+                            ifelse(lisa[,1] <= 0 & lisa[,2] > 0, "Low-High",
+                                   ifelse(lisa[,1] > 0 & lisa[,2] <= 0, "High-Low", "High-High"))))
+color_map <- c("Low-Low" = "lightblue",
+               "Low-High" = "lightgreen",
+               "High-Low" = "lightyellow",
+               "High-High" = "red")
+
+#Graficar Mapa Cluster LISA
+ggplot(data = datos) +
+  geom_sf(aes(fill = lisa), color = NA) +
+  scale_fill_manual(values = color_map) +
+  labs(title = "Mapa de Clusters de LISA ICV_P2",
+       fill = "Categor??a LISA") +
+  theme_minimal()
+
+# Funci??n para clasificar los p-valores
+classify_pvalues <- function(pvalue) {
+  if (pvalue < 0.0001) {
+    return("p < 0.0001")
+  } else if (pvalue < 0.001) {
+    return("p < 0.001")
+  } else if (pvalue < 0.01) {
+    return("p < 0.01")
+  } else if (pvalue < 0.05) {
+    return("p < 0.05")
+  } else {
+    return("p >= 0.05")
+  }
+}
+
+# Aplicar la funci??n a los datos
+datos$LISA_pvalue_class <- sapply(datos$LISA_pvalue, classify_pvalues)
+
+# Definir los colores para los diferentes niveles de significancia
+pvalue_colors <- c(
+  "p < 0.0001" = "darkred",
+  "p < 0.001" = "red",
+  "p < 0.01" = "orange",
+  "p < 0.05" = "yellow",
+  "No significativo" = "white"
+)
+
+# Aplicar colores a los p-valores clasificados
+datos$LISA_color <- pvalue_colors[datos$LISA_pvalue_class]
+
+# Verificar los valores ??nicos en la columna de p-valores
+unique(datos$LISA_pvalue_class)
+
+# Graficar el mapa de significancia LISA
+plot(st_geometry(datos), col=datos$LISA_color, main="Mapa de Significancia de LISA para ICV_PCA")
+legend("bottomleft", legend=names(pvalue_colors), fill=pvalue_colors, bty="n", title="p-value")
+
+# Crear un mapa de calor
+ggplot(data = datos) +
+  geom_sf(aes(fill = lisa)) +
+  scale_fill_gradientn(colours = brewer.pal(9, "YlOrRd")) +
+  theme_minimal() +
+  labs(fill = "LISA", title = "Mapa de Calor de LISA ICV_PCA")
